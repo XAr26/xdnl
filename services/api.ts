@@ -1,15 +1,10 @@
-import { Platform } from "react-native";
+import { Config } from "../constants/config";
 
-// Gunakan localhost untuk emulator android/ios, atau ganti dengan IP mesin jika menggunakan perangkat fisik
-const API_URL = Platform.select({
-  ios: "http://192.168.1.92:8000",
-  android: "http://192.168.1.92:8000", // IP Laptop untuk perangkat fisik
-  default: "http://192.168.1.92:8000",
-});
+const API_URL = Config.API_URL;
 
 export async function fetchMediaInfo(url: string) {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), 10000); // 10 detik timeout
+  const id = setTimeout(() => controller.abort(), Config.TIMEOUT_MS);
 
   try {
     const res = await fetch(`${API_URL}/info`, {

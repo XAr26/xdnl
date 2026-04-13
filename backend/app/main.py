@@ -1,6 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import yt_dlp
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -13,18 +18,33 @@ async def root():
 
 @app.post("/info")
 async def get_info(req: UrlRequest):
+    # Basic validation
+    if not req.url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL tidak valid. Harus dimulai dengan http atau https.")
+
     ydl_opts = {
         "quiet": True,
         "skip_download": True,
-        "format": "best"
+        "format": "best",
+        "no_warnings": True,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(req.url, download=False)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"Extracting info for: {req.url}")
+            info = ydl.extract_info(req.url, download=False)
 
-        return {
-            "title": info.get("title"),
-            "thumbnail": info.get("thumbnail"),
-            "duration": info.get("duration"),
-            "url": info.get("url")
-        }
+            if not info:
+                raise HTTPException(status_code=404, detail="Media tidak ditemukan atau tidak didukung.")
+
+            return {
+                "title": info.get("title"),
+                "thumbnail": info.get("thumbnail"),
+                "duration": info.get("duration"),
+                "url": info.get("url"),
+                "ext": info.get("ext"),
+                "uploader": info.get("uploader")
+            }
+    except Exception as e:
+        logger.error(f"Error extracting info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Gagal mengambil data: {str(e)}")

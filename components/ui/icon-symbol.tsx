@@ -22,6 +22,8 @@ const MAPPING = {
   'person.fill': 'account-circle',
   'sparkles.fill': 'auto-fix-high',
   'message.fill': 'chat-bubble',
+  'bolt.fill': 'bolt',
+  'arrow.down.circle.fill': 'file-download',
 } as any as IconMapping;
 
 /**

@@ -12,6 +12,7 @@ import Animated, {
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { MaterialTopTabs } from '@/components/SwipeableTabs';
+import { useAppStore } from '@/services/store';
 
 const { width } = Dimensions.get('window');
 
@@ -43,14 +44,24 @@ function AnimatedTabIcon({ focused, name, color }: { focused: boolean; name: any
 }
 
 export default function TabLayout() {
+  const { isDarkMode } = useAppStore();
+
+  const theme = {
+    tabBg: isDarkMode ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+    tabBorder: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(15, 23, 41, 0.1)',
+    containerBg: isDarkMode ? '#020617' : '#f8fafc',
+    activeTint: '#22d3ee',
+    inactiveTint: isDarkMode ? '#64748b' : '#94a3b8',
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.containerBg }]}>
       <MaterialTopTabs
         tabBarPosition="bottom"
         keyboardDismissMode="on-drag"
         screenOptions={{
-          tabBarActiveTintColor: '#818cf8',
-          tabBarInactiveTintColor: '#64748b',
+          tabBarActiveTintColor: theme.activeTint,
+          tabBarInactiveTintColor: theme.inactiveTint,
           tabBarIndicatorStyle: { height: 0 },
           tabBarShowLabel: false,
           tabBarStyle: {
@@ -61,13 +72,13 @@ export default function TabLayout() {
             elevation: 8,
             height: 64,
             borderRadius: 32,
-            backgroundColor: 'rgba(15, 23, 42, 0.8)',
+            backgroundColor: theme.tabBg,
             borderTopWidth: 0,
             borderWidth: 1,
-            borderColor: 'rgba(255, 255, 255, 0.1)',
+            borderColor: theme.tabBorder,
             shadowColor: '#000',
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
+            shadowOpacity: isDarkMode ? 0.3 : 0.1,
             shadowRadius: 8,
           },
           tabBarShowIcon: true,
@@ -97,7 +108,7 @@ export default function TabLayout() {
           options={{
             title: 'AI',
             tabBarIcon: ({ color, focused }) => (
-              <AnimatedTabIcon focused={focused} name="sparkles.fill" color={color} />
+              <AnimatedTabIcon focused={focused} name="bolt.fill" color={color} />
             ),
           }}
         />
@@ -132,7 +143,7 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    shadowColor: '#818cf8',
+    shadowColor: '#22d3ee',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 4,

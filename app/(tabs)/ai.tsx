@@ -19,8 +19,13 @@ import { useRouter } from "expo-router";
 
 import { ThemedText } from "@/components/themed-text";
 import { useAppStore } from "@/services/store";
+import { Config } from "@/constants/config";
 
 const { width } = Dimensions.get("window");
+const OLLAMA_URL = Config.OLLAMA_URL;
+const OLLAMA_MODEL = Config.OLLAMA_MODEL;
+const SYSTEM_PROMPT = `Anda Xdwn AI, asisten download video. Berikan saran video. 
+Format saran WAJIB di akhir: SUGGESTION_JSON:{"title":"..","url":"..","thumbnail":".."}`;
 
 interface Message {
   id: string;
@@ -39,14 +44,25 @@ export default function AIScreen() {
     {
       id: "1",
       type: "ai",
-      text: "Halo! Saya AntiGravity AI. Butuh saran video keren untuk didownload hari ini?",
+      text: "Halo! Saya Xdwn AI. Ada video menarik yang ingin kamu unduh hari ini?",
     },
   ]);
   const [isTyping, setIsTyping] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
-  
-  const { aiFireLevel, aiFireType, addExperience } = useAppStore();
+
+  const { aiFireLevel, addExperience, isDarkMode } = useAppStore();
+
+  const theme = {
+    bg: isDarkMode ? ["#020617", "#0f172a", "#083344"] : ["#f8fafc", "#f1f5f9", "#cbd5e1"],
+    text: isDarkMode ? "#fff" : "#0f172a",
+    subText: isDarkMode ? "#64748b" : "#475569",
+    aiBubble: isDarkMode ? "rgba(15, 23, 42, 0.5)" : "rgba(255, 255, 255, 0.9)",
+    userBubble: isDarkMode ? "#06b6d4" : "rgba(6, 182, 212, 0.15)",
+    border: isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(15, 23, 41, 0.1)",
+    inputAreaBg: isDarkMode ? "rgba(15, 23, 42, 0.6)" : "rgba(255, 255, 255, 0.6)",
+    blur: isDarkMode ? "dark" : ("light" as any),
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -57,33 +73,71 @@ export default function AIScreen() {
     setIsTyping(true);
     addExperience(10);
 
-    // Simulasi AI Logic
-    setTimeout(() => {
-      let aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "ai",
-        text: "Tentu! Ini beberapa video yang sedang trending dan mungkin kamu suka:",
-      };
+    // Ollama Local AI Logic
+    try {
+      const chatHistory = [
+        { role: "system", content: SYSTEM_PROMPT }
+      ];
 
-      const lowerInput = input.toLowerCase();
-      if (lowerInput.includes("lucu") || lowerInput.includes("funny")) {
-        aiResponse.text = "Ini video lucu yang bisa bikin kamu tertawa:";
-        aiResponse.suggestion = {
-          title: "Top 10 Funny Cats 2026",
-          url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-          thumbnail: "https://placedog.net/500/280",
-        };
-      } else {
-        aiResponse.suggestion = {
-            title: "Exploring the Galaxy - Premium 4K",
-            url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            thumbnail: "https://placedog.net/500/280",
-        };
+      messages.forEach(msg => {
+        chatHistory.push({
+          role: msg.type === "user" ? "user" : "assistant",
+          content: msg.text
+        });
+      });
+
+      // Tambahkan pesan user terbaru
+      chatHistory.push({ role: "user", content: input });
+
+      const response = await fetch(OLLAMA_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: OLLAMA_MODEL,
+          messages: chatHistory,
+          stream: false
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) throw new Error(data.error || "Gagal menghubungi Ollama");
+
+      const aiText = data.message.content;
+
+      // Parsing Suggestion JSON jika ada
+      const jsonMatch = aiText.match(/SUGGESTION_JSON:({.*})/);
+      let suggestion = undefined;
+      let cleanText = aiText;
+
+      if (jsonMatch) {
+        try {
+          suggestion = JSON.parse(jsonMatch[1]);
+          cleanText = aiText.replace(/SUGGESTION_JSON:{.*}/, "").trim();
+        } catch (e) {
+          console.error("Failed to parse suggestion JSON", e);
+        }
       }
 
+      const aiResponse: Message = {
+        id: Date.now().toString(),
+        type: "ai",
+        text: cleanText,
+        suggestion
+      };
+
       setMessages((prev) => [...prev, aiResponse]);
+    } catch (error: any) {
+      console.error(error);
+      const errorMsg: Message = {
+        id: Date.now().toString(),
+        type: "ai",
+        text: "Maaf, gagal terhubung ke Ollama. Pastikan Ollama sudah berjalan di komputer Anda dan alamat IP benar. 🛰️",
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const handleSuggestionClick = (url: string) => {
@@ -95,9 +149,9 @@ export default function AIScreen() {
   }, [messages, isTyping]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.bg[0] }]}>
       <LinearGradient
-        colors={["#020617", "#0f172a", "#1e1b4b"]}
+        colors={theme.bg as any}
         style={StyleSheet.absoluteFill}
       />
 
@@ -107,11 +161,11 @@ export default function AIScreen() {
         keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
       >
         <View style={styles.header}>
-            <View style={styles.aiBadge}>
-                <Ionicons name={aiFireType as any} size={14} color="#f59e0b" />
-                <ThemedText style={styles.aiBadgeText}>LVL {aiFireLevel} Assistant</ThemedText>
-            </View>
-            <ThemedText type="title" style={styles.title}>AntiGravity AI</ThemedText>
+          <View style={[styles.aiBadge, { backgroundColor: isDarkMode ? "rgba(34, 211, 238, 0.1)" : "rgba(34, 211, 238, 0.05)" }]}>
+            <Ionicons name="flash" size={14} color="#22d3ee" />
+            <ThemedText style={styles.aiBadgeText}>LVL {aiFireLevel} Assistant</ThemedText>
+          </View>
+          <ThemedText type="title" style={[styles.title, { color: theme.text }]}>Xdwn AI</ThemedText>
         </View>
 
         <ScrollView
@@ -131,42 +185,58 @@ export default function AIScreen() {
             >
               {msg.type === "ai" && (
                 <View style={styles.aiAvatar}>
-                   <Ionicons name="infinite" size={16} color="#fff" />
+                  <Ionicons name="infinite" size={16} color="#fff" />
                 </View>
               )}
-              
+
               <View style={styles.bubbleContainer}>
                 <BlurView
                   intensity={msg.type === "ai" ? 15 : 0}
-                  tint="dark"
+                  tint={theme.blur}
                   style={[
                     styles.messageBubble,
-                    msg.type === "user" ? styles.userBubble : styles.aiBubble,
+                    msg.type === "user" ? { backgroundColor: theme.userBubble, borderBottomRightRadius: 4 } : { backgroundColor: theme.aiBubble, borderColor: theme.border, borderWidth: 1, borderBottomLeftRadius: 4 },
                   ]}
                 >
-                  <ThemedText style={styles.messageText}>{msg.text}</ThemedText>
+                  <ThemedText style={[styles.messageText, { color: msg.type === "user" && isDarkMode ? "#fff" : theme.text }]}>{msg.text}</ThemedText>
                 </BlurView>
 
                 {msg.suggestion && (
                   <TouchableOpacity
                     onPress={() => handleSuggestionClick(msg.suggestion!.url)}
                     activeOpacity={0.8}
-                    style={styles.suggestionCard}
+                    style={[styles.suggestionCard, { borderColor: theme.border }]}
                   >
-                    <BlurView intensity={30} tint="dark" style={styles.suggestionBlur}>
-                        <Image 
-                          source={{ uri: msg.suggestion.thumbnail }} 
-                          style={styles.suggestionThumb} 
-                        />
-                        <View style={styles.suggestionInfo}>
-                          <ThemedText type="defaultSemiBold" numberOfLines={1} style={styles.suggestionTitle}>
-                              {msg.suggestion.title}
-                          </ThemedText>
-                          <View style={styles.suggestionAction}>
-                              <ThemedText style={styles.suggestionLink}>Download Now</ThemedText>
-                              <Ionicons name="arrow-forward-circle" size={16} color="#818cf8" />
-                          </View>
+                    <BlurView intensity={30} tint={theme.blur} style={styles.suggestionBlur}>
+                      <Image
+                        source={{ uri: msg.suggestion.thumbnail }}
+                        style={styles.suggestionThumb}
+                      />
+                      <View style={styles.suggestionInfo}>
+                        <ThemedText type="defaultSemiBold" numberOfLines={1} style={[styles.suggestionTitle, { color: theme.text }]}>
+                          {msg.suggestion.title}
+                        </ThemedText>
+                        <View style={styles.suggestionAction}>
+                          <ThemedText style={styles.suggestionLink}>Download Now</ThemedText>
+                          <Ionicons name="arrow-forward-circle" size={16} color="#22d3ee" />
                         </View>
+                      </View>
+                    </BlurView>
+                  </TouchableOpacity>
+                )}
+
+                {msg.type === "user" && msg.text.match(/(https?:\/\/[^\s]+)/) && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      const url = msg.text.match(/(https?:\/\/[^\s]+)/)?.[0];
+                      if (url) handleSuggestionClick(url);
+                    }}
+                    activeOpacity={0.8}
+                    style={[styles.urlActionCard, { borderColor: theme.border }]}
+                  >
+                    <BlurView intensity={30} tint={isDarkMode ? "light" : "dark"} style={styles.urlActionBlur}>
+                      <Ionicons name="search" size={14} color="#fff" />
+                      <ThemedText style={styles.urlActionText}>Analisis Video Ini</ThemedText>
                     </BlurView>
                   </TouchableOpacity>
                 )}
@@ -174,30 +244,30 @@ export default function AIScreen() {
             </Animated.View>
           ))}
           {isTyping && (
-             <Animated.View entering={FadeInUp} style={styles.typingContainer}>
-                <BlurView intensity={10} tint="dark" style={styles.typingBlur}>
-                  <ActivityIndicator size="small" color="#818cf8" />
-                  <ThemedText style={styles.typingText}>AI is thinking...</ThemedText>
-                </BlurView>
-             </Animated.View>
+            <Animated.View entering={FadeInUp} style={styles.typingContainer}>
+              <BlurView intensity={10} tint="dark" style={styles.typingBlur}>
+                <ActivityIndicator size="small" color="#22d3ee" />
+                <ThemedText style={styles.typingText}>AI is thinking...</ThemedText>
+              </BlurView>
+            </Animated.View>
           )}
         </ScrollView>
 
-        <BlurView intensity={25} tint="dark" style={styles.inputArea}>
-          <View style={styles.inputWrapper}>
+        <BlurView intensity={25} tint={theme.blur} style={[styles.inputArea, { borderColor: theme.border }]}>
+          <View style={[styles.inputWrapper, { backgroundColor: theme.inputAreaBg, borderColor: theme.border }]}>
             <TextInput
               placeholder="Type your question..."
-              placeholderTextColor="#475569"
+              placeholderTextColor={isDarkMode ? "#475569" : "#94a3b8"}
               value={input}
               onChangeText={setInput}
-              style={styles.input}
+              style={[styles.input, { color: theme.text }]}
               onFocus={() => {
                 setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
               }}
             />
             <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
               <LinearGradient
-                colors={["#6366f1", "#4f46e5"]}
+                colors={["#06b6d4", "#0891b2"]}
                 style={styles.sendGradient}
               >
                 <Ionicons name="arrow-up" size={20} color="#fff" />
@@ -223,7 +293,7 @@ const styles = StyleSheet.create({
   aiBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(129, 140, 248, 0.1)",
+    backgroundColor: "rgba(34, 211, 238, 0.1)",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
@@ -231,12 +301,12 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "rgba(129, 140, 248, 0.2)",
+    borderColor: "rgba(34, 211, 238, 0.2)",
   },
   aiBadgeText: {
     fontSize: 12,
     fontWeight: "800",
-    color: "#818cf8",
+    color: "#22d3ee",
     letterSpacing: 1,
   },
   title: {
@@ -264,7 +334,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#6366f1",
+    backgroundColor: "#06b6d4",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 4,
@@ -278,7 +348,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   userBubble: {
-    backgroundColor: "#6366f1",
+    backgroundColor: "#06b6d4",
     borderBottomRightRadius: 4,
   },
   aiBubble: {
@@ -326,13 +396,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   suggestionLink: {
-    color: "#818cf8",
+    color: "#22d3ee",
     fontSize: 12,
     fontWeight: "800",
   },
   typingContainer: {
-     alignSelf: "flex-start",
-     marginBottom: 20,
+    alignSelf: "flex-start",
+    marginBottom: 20,
   },
   typingBlur: {
     flexDirection: "row",
@@ -383,6 +453,27 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-  }
+  },
+  urlActionCard: {
+    marginTop: 8,
+    borderRadius: 16,
+    overflow: "hidden",
+    alignSelf: "flex-end",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  urlActionBlur: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(6, 182, 212, 0.3)",
+  },
+  urlActionText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
 });
 

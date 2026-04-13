@@ -13,10 +13,12 @@ import {
 } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
+import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
+import * as Notifications from 'expo-notifications';
 import Animated, { 
   FadeInUp, 
   FadeInDown,
@@ -26,6 +28,7 @@ import Animated, {
   withTiming,
   useSharedValue,
 } from "react-native-reanimated";
+import { useRouter } from "expo-router";
 
 
 import { ThemedText } from "@/components/themed-text";
@@ -34,14 +37,39 @@ import { useAppStore } from "@/services/store";
 
 const { width, height } = Dimensions.get("window");
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
 export default function HomeScreen() {
   const [url, setUrl] = useState("");
   const { getInfo, loading } = useMediaInfo();
   const [mediaData, setMediaData] = useState<any>(null);
-  const addToHistory = useAppStore((state) => state.addToHistory);
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  const { addToHistory, isDarkMode, updateHistoryProgress, updateHistoryStatus, isAlreadyDownloaded } = useAppStore();
+  const router = useRouter();
+
+  const theme = {
+    bg: isDarkMode ? ["#020617", "#0f172a", "#083344"] : ["#f8fafc", "#f1f5f9", "#dee2e6"],
+    text: isDarkMode ? "#fff" : "#0f172a",
+    subText: isDarkMode ? "#64748b" : "#475569",
+    cardBg: isDarkMode ? "rgba(15, 23, 42, 0.5)" : "rgba(255, 255, 255, 0.8)",
+    border: isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(15, 23, 41, 0.1)",
+    inputBg: isDarkMode ? "rgba(15, 23, 42, 0.5)" : "rgba(255, 255, 255, 0.5)",
+    blur: isDarkMode ? "dark" : ("light" as any),
+  };
 
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [quality, setQuality] = useState("720p");
+  const [clipboardUrl, setClipboardUrl] = useState<string | null>(null);
+  const [showClipboardBanner, setShowClipboardBanner] = useState(false);
 
   const glowOpacity = useSharedValue(0.2);
 
@@ -54,6 +82,24 @@ export default function HomeScreen() {
       -1,
       true
     );
+
+    const requestPermissions = async () => {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        await Notifications.requestPermissionsAsync();
+      }
+    };
+    
+    const checkClipboard = async () => {
+      const content = await Clipboard.getStringAsync();
+      if (content && (content.startsWith("http://") || content.startsWith("https://"))) {
+        setClipboardUrl(content);
+        setShowClipboardBanner(true);
+      }
+    };
+
+    requestPermissions();
+    checkClipboard();
   }, []);
 
   const glowStyle = useAnimatedStyle(() => ({
@@ -70,11 +116,12 @@ export default function HomeScreen() {
       const result = await getInfo(url);
       setMediaData(result);
       
-      addToHistory({
+      const historyId = addToHistory({
         title: result.title || "Media Tanpa Judul",
         thumbnail: result.thumbnail || "",
         url: url
       });
+      setCurrentHistoryId(historyId);
     } catch (err: any) {
       Alert.alert("Gagal", err.message || "Gagal mengambil data media.");
     }
@@ -83,6 +130,25 @@ export default function HomeScreen() {
   const handleDownload = async () => {
     if (!mediaData || !mediaData.url) return;
 
+    if (isAlreadyDownloaded(mediaData.url)) {
+      Alert.alert(
+        "Video Sudah Ada",
+        "Video ini pernah kamu download sebelumnya. Mau download lagi?",
+        [
+          { text: "Batal", style: "cancel" },
+          { text: "Lihat History", onPress: () => router.push("/explore") },
+          { text: "Download Lagi", onPress: () => startDownload() },
+        ]
+      );
+      return;
+    }
+
+    startDownload();
+  };
+
+  const startDownload = async () => {
+    let downloadId: string | undefined;
+
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== "granted") {
@@ -90,16 +156,44 @@ export default function HomeScreen() {
         return;
       }
 
+      if (currentHistoryId) {
+        updateHistoryStatus(currentHistoryId, 'downloading');
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        identifier: "download-progress",
+        content: {
+          title: "Memulai Download...",
+          body: mediaData.title || "Menyiapkan file...",
+        },
+        trigger: null,
+      });
+
       setIsDownloading(true);
       setDownloadProgress(0);
 
+      let lastNotifiedStep = 0;
       const callback = (downloadProgress: FileSystem.DownloadProgressData) => {
         const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
         setDownloadProgress(progress);
+        if (currentHistoryId) updateHistoryProgress(currentHistoryId, progress);
+
+        const currentStep = Math.floor(progress * 10); // 10% steps
+        if (currentStep > lastNotifiedStep) {
+          lastNotifiedStep = currentStep;
+          Notifications.scheduleNotificationAsync({
+            identifier: "download-progress",
+            content: {
+              title: `Downloading... ${Math.round(progress * 100)}%`,
+              body: mediaData.title || "Sedang mengunduh video...",
+            },
+            trigger: null,
+          });
+        }
       };
 
       const sanitizedTitle = (mediaData.title || "download").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      const fileUri = `${FileSystem.documentDirectory}${sanitizedTitle}.mp4`;
+      const fileUri = `${FileSystem.documentDirectory}${sanitizedTitle}_${quality}.mp4`;
 
       const downloadResumable = FileSystem.createDownloadResumable(
         mediaData.url,
@@ -113,10 +207,34 @@ export default function HomeScreen() {
       if (result && result.uri) {
         await MediaLibrary.saveToLibraryAsync(result.uri);
         useAppStore.getState().addExperience(50);
+        if (currentHistoryId) updateHistoryStatus(currentHistoryId, 'done');
+        
+        await Notifications.scheduleNotificationAsync({
+          identifier: "download-progress",
+          content: {
+            title: "Download Selesai ✅",
+            body: `${mediaData.title || "Video"} tersimpan di Galeri`,
+          },
+          trigger: null,
+        });
+
         Alert.alert("Berhasil", "Video telah tersimpan di Galeri Anda!");
       }
 
     } catch (e: any) {
+      if (currentHistoryId) {
+        updateHistoryStatus(currentHistoryId, 'failed');
+      }
+      
+      await Notifications.scheduleNotificationAsync({
+        identifier: "download-progress",
+        content: {
+          title: "Download Gagal ❌",
+          body: "Terjadi kesalahan saat mengunduh",
+        },
+        trigger: null,
+      });
+
       Alert.alert("Download Gagal", e.message || "Terjadi kesalahan sistem.");
     } finally {
       setIsDownloading(false);
@@ -125,16 +243,16 @@ export default function HomeScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.bg[0] }]}>
       <LinearGradient
-        colors={["#020617", "#0f172a", "#1e1b4b"]}
+        colors={theme.bg as any}
         style={StyleSheet.absoluteFill}
       />
       
       {/* Animated Glow Effect */}
       <Animated.View style={[styles.glowBackground, glowStyle]}>
         <LinearGradient
-          colors={["#6366f1", "transparent"]}
+          colors={["#06b6d4", "transparent"]}
           style={styles.glowCircle}
         />
       </Animated.View>
@@ -147,43 +265,43 @@ export default function HomeScreen() {
           <Animated.View entering={FadeInUp.delay(200)} style={styles.header}>
             <View style={styles.logoWrapper}>
               <LinearGradient
-                colors={["#818cf8", "#6366f1"]}
+                colors={["#22d3ee", "#06b6d4"]}
                 style={styles.logoGradient}
               >
                 <Ionicons name="infinite-outline" size={40} color="#fff" />
               </LinearGradient>
               <View style={styles.logoOrbit} />
             </View>
-            <ThemedText type="title" style={styles.title}>
-              AntiGravity
+            <ThemedText type="title" style={[styles.title, { color: theme.text }]}>
+              Xdwn
             </ThemedText>
-            <ThemedText style={styles.subtitle}>
-              Bebaskan media dari batas gravitasi platform apa pun
+            <ThemedText style={[styles.subtitle, { color: theme.subText }]}>
+              Solusi cerdas unduhan media tanpa batas.
             </ThemedText>
           </Animated.View>
 
           <Animated.View entering={FadeInUp.delay(400)} style={styles.mainCardContainer}>
-            <BlurView intensity={30} tint="dark" style={styles.glassCard}>
+            <BlurView intensity={30} tint={theme.blur} style={[styles.glassCard, { borderColor: theme.border }]}>
               <View style={styles.inputSection}>
                 <View style={styles.inputHeader}>
                   <ThemedText style={styles.inputLabel}>MASUKKAN TAUTAN</ThemedText>
-                  {loading && <ActivityIndicator size="small" color="#818cf8" />}
+                  {loading && <ActivityIndicator size="small" color="#22d3ee" />}
                 </View>
                 
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="link-sharp" size={20} color="#818cf8" style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, { backgroundColor: theme.inputBg, borderColor: theme.border }]}>
+                  <Ionicons name="link-sharp" size={20} color="#22d3ee" style={styles.inputIcon} />
                   <TextInput
                     placeholder="YouTube, TikTok, Instagram..."
-                    placeholderTextColor="#475569"
+                    placeholderTextColor={isDarkMode ? "#475569" : "#94a3b8"}
                     value={url}
                     onChangeText={setUrl}
-                    style={styles.input}
+                    style={[styles.input, { color: theme.text }]}
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
                   {url.length > 0 && (
                     <TouchableOpacity onPress={() => setUrl("")} style={styles.clearBtn}>
-                      <Ionicons name="close-circle" size={20} color="#64748b" />
+                      <Ionicons name="close-circle" size={20} color={theme.subText} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -194,7 +312,7 @@ export default function HomeScreen() {
                   style={styles.actionBtn}
                 >
                   <LinearGradient
-                    colors={["#6366f1", "#4f46e5"]}
+                    colors={["#06b6d4", "#0891b2"]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
                     style={styles.btnGradient}
@@ -209,12 +327,43 @@ export default function HomeScreen() {
             </BlurView>
           </Animated.View>
 
+          {showClipboardBanner && clipboardUrl && (
+            <Animated.View entering={FadeInDown} style={styles.clipboardBannerContainer}>
+              <BlurView intensity={40} tint={theme.blur} style={[styles.clipboardBanner, { borderColor: theme.border }]}>
+                <View style={styles.bannerInfo}>
+                  <Ionicons name="clipboard-outline" size={20} color="#22d3ee" />
+                  <View style={styles.bannerTextContent}>
+                    <ThemedText style={[styles.bannerTitle, { color: theme.text }]}>Link di clipboard</ThemedText>
+                    <ThemedText numberOfLines={1} style={[styles.bannerUrl, { color: theme.subText }]}>{clipboardUrl}</ThemedText>
+                  </View>
+                </View>
+                <View style={styles.bannerActions}>
+                  <TouchableOpacity 
+                    onPress={() => setShowClipboardBanner(false)}
+                    style={styles.bannerAbaikan}
+                  >
+                    <ThemedText style={styles.bannerAbaikanText}>Abaikan</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      setUrl(clipboardUrl);
+                      setShowClipboardBanner(false);
+                    }}
+                    style={styles.bannerTempel}
+                  >
+                    <ThemedText style={styles.bannerTempelText}>Tempel</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </BlurView>
+            </Animated.View>
+          )}
+
           {mediaData && (
             <Animated.View entering={FadeInUp.springify()} style={styles.resultContainer}>
               <View style={styles.resultHeader}>
-                <ThemedText style={styles.sectionTitle}>HASIL ANALISIS</ThemedText>
+                <ThemedText style={[styles.sectionTitle, { color: theme.subText }]}>HASIL ANALISIS</ThemedText>
               </View>
-              <BlurView intensity={40} tint="dark" style={styles.resultCard}>
+              <BlurView intensity={40} tint={theme.blur} style={[styles.resultCard, { borderColor: theme.border }]}>
                 <View style={styles.thumbnailContainer}>
                   <Image
                     source={{ uri: mediaData.thumbnail }}
@@ -228,13 +377,13 @@ export default function HomeScreen() {
                 </View>
                 
                 <View style={styles.resultInfo}>
-                  <ThemedText type="defaultSemiBold" numberOfLines={2} style={styles.mediaTitle}>
+                  <ThemedText type="defaultSemiBold" numberOfLines={2} style={[styles.mediaTitle, { color: theme.text }]}>
                     {mediaData.title}
                   </ThemedText>
                   
                   <View style={styles.platformBadge}>
-                    <Ionicons name="play-circle-outline" size={14} color="#94a3b8" />
-                    <ThemedText style={styles.platformText}>Media Detectable</ThemedText>
+                    <Ionicons name="play-circle-outline" size={14} color={theme.subText} />
+                    <ThemedText style={[styles.platformText, { color: theme.subText }]}>Media Detectable</ThemedText>
                   </View>
 
                   <View style={styles.divider} />
@@ -249,7 +398,28 @@ export default function HomeScreen() {
                        </View>
                     </View>
                   ) : (
-                    <View style={styles.actionGrid}>
+                    <View>
+                      <View style={[styles.qualityContainer, { backgroundColor: isDarkMode ? "rgba(0,0,0,0.2)" : "rgba(15, 23, 42, 0.05)" }]}>
+                        {["360p", "720p", "1080p"].map((q) => (
+                          <TouchableOpacity 
+                            key={q}
+                            onPress={() => setQuality(q)}
+                            style={[
+                              styles.qualityOption, 
+                              quality === q && styles.qualityOptionActive
+                            ]}
+                          >
+                            <ThemedText style={[
+                              styles.qualityText,
+                              quality === q && styles.qualityTextActive
+                            ]}>
+                              {q}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <View style={styles.actionGrid}>
                       <TouchableOpacity onPress={handleDownload} style={styles.downloadOption} disabled={isDownloading}>
                          <LinearGradient
                           colors={["#10b981", "#059669"]}
@@ -269,6 +439,7 @@ export default function HomeScreen() {
                           <ThemedText style={styles.optionText}>Audio MP3</ThemedText>
                         </LinearGradient>
                       </TouchableOpacity>
+                      </View>
                     </View>
                   )}
                 </View>
@@ -277,7 +448,7 @@ export default function HomeScreen() {
           )}
 
           <View style={styles.footer}>
-             <ThemedText style={styles.footerText}>Ready for lift-off 🚀</ThemedText>
+             <ThemedText style={styles.footerText}>Simplified downloads for everyone 🚀</ThemedText>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -334,7 +505,7 @@ const styles = StyleSheet.create({
     height: 110,
     borderRadius: 55,
     borderWidth: 1,
-    borderColor: "rgba(129, 140, 248, 0.2)",
+    borderColor: "rgba(34, 211, 238, 0.2)",
     borderStyle: "dashed",
   },
   title: {
@@ -372,7 +543,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#818cf8",
+    color: "#22d3ee",
     letterSpacing: 2,
   },
   inputWrapper: {
@@ -514,13 +685,99 @@ const styles = StyleSheet.create({
     backgroundColor: "#10b981",
     borderRadius: 4,
   },
+  qualityContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(0,0,0,0.2)",
+    padding: 6,
+    borderRadius: 14,
+    marginBottom: 16,
+    gap: 8,
+  },
+  qualityOption: {
+    flex: 1,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.02)",
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  qualityOptionActive: {
+    backgroundColor: "rgba(6, 182, 212, 0.15)",
+    borderColor: "rgba(6, 182, 212, 0.4)",
+  },
+  qualityText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748b",
+  },
+  qualityTextActive: {
+    color: "#22d3ee",
+  },
   footer: {
     marginTop: 50,
     alignItems: "center",
   },
   footerText: {
-    color: "#334155",
+    color: "#475569",
     fontSize: 14,
     fontWeight: "600",
-  }
+  },
+  clipboardBannerContainer: {
+    marginBottom: 24,
+  },
+  clipboardBanner: {
+    borderRadius: 24,
+    overflow: "hidden",
+    padding: 16,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  bannerInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  bannerTextContent: {
+    flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  bannerUrl: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  bannerActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginLeft: 12,
+  },
+  bannerAbaikan: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  bannerAbaikanText: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  bannerTempel: {
+    backgroundColor: "#06b6d4",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  bannerTempelText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
 });

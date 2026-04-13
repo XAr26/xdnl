@@ -5,62 +5,165 @@ import {
   TouchableOpacity,
   Switch,
   Platform,
+  Alert,
+  Modal,
+  TextInput,
+  Linking,
 } from "react-native";
+import { useState, useEffect } from "react";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInUp } from "react-native-reanimated";
+import * as ImagePicker from "expo-image-picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ThemedText } from "@/components/themed-text";
 import { useAppStore } from "@/services/store";
+import { Config } from "@/constants/config";
 
 export default function ProfileScreen() {
-  const { history, aiFireLevel, aiExperience, aiFireType, setFireType } = useAppStore();
+  const { history, aiFireLevel, aiExperience, userName, updateUserName, isDarkMode, toggleDarkMode, turboDownload, toggleTurboDownload, avatarUri, setAvatarUri } = useAppStore();
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newName, setNewName] = useState(userName);
+
+  const theme = {
+    bg: isDarkMode ? ["#020617", "#0f172a", "#083344"] : ["#f8fafc", "#f1f5f9", "#cbd5e1"],
+    text: isDarkMode ? "#fff" : "#0f172a",
+    subText: isDarkMode ? "#64748b" : "#475569",
+    card: isDarkMode ? "rgba(15, 23, 42, 0.5)" : "rgba(255, 255, 255, 0.9)",
+    border: isDarkMode ? "rgba(255, 255, 255, 0.05)" : "rgba(15, 23, 41, 0.1)",
+    blur: isDarkMode ? "dark" : ("light" as any),
+  };
+
   const xpNeeded = aiFireLevel * 100;
   const progress = (aiExperience / xpNeeded) * 100;
 
-  const fireStyles = [
-    { type: 'flame', icon: 'flame', color: '#f59e0b' },
-    { type: 'bonfire', icon: 'bonfire', color: '#ef4444' },
-    { type: 'flash', icon: 'flash', color: '#eab308' },
-    { type: 'sparkles', icon: 'sparkles', color: '#818cf8' },
-  ];
+
+
+  const handleEditName = () => {
+    if (Platform.OS === 'ios') {
+      Alert.prompt(
+        "Ganti Nama",
+        "Masukkan nama baru Anda",
+        [
+          { text: "Batal", style: "cancel" },
+          { 
+            text: "Simpan", 
+            onPress: (name?: string) => {
+              if (name && name.trim()) updateUserName(name.trim());
+            } 
+          }
+        ],
+        "plain-text",
+        userName
+      );
+    } else {
+      setNewName(userName);
+      setModalVisible(true);
+    }
+  };
+
+  const saveNameAndroid = () => {
+    if (newName.trim()) {
+      updateUserName(newName.trim());
+      setModalVisible(false);
+    }
+  };
+
+  const handleHelpCenter = () => {
+    Linking.openURL(Config.WA_SUPPORT);
+  };
+
+  const handleRateApp = () => {
+    const url = Platform.OS === 'ios' 
+      ? Config.APP_STORE_URL
+      : Config.PLAY_STORE_URL;
+
+    Alert.alert(
+      "Beri Rating",
+      `Buka halaman rating di ${Platform.OS === 'ios' ? 'App Store' : 'Play Store'}?`,
+      [
+        { text: "Batal", style: "cancel" },
+        { text: "Ya, Buka", onPress: () => Linking.openURL(url) }
+      ]
+    );
+  };
+
+  const handleAboutApp = () => {
+    Alert.alert(
+      `Xdwn v${Config.VERSION}`,
+      `Developer: ${Config.DEVELOPER}\nKontak: ${Config.CONTACT_EMAIL}\n\nXdwn adalah aplikasi download media terbaik untuk semua platform.`,
+      [{ text: "Tutup" }]
+    );
+  };
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert("Izin Ditolak", "Dibutuhkan akses ke galeri untuk mengganti foto profil.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setAvatarUri(result.assets[0].uri);
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.bg[0] }]}>
       <LinearGradient
-        colors={["#020617", "#0f172a", "#1b1a33"]}
+        colors={theme.bg as any}
         style={StyleSheet.absoluteFill}
       />
       
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Animated.View entering={FadeInUp.delay(200).springify()} style={styles.header}>
           <View style={styles.avatarWrapper}>
-            <View style={styles.avatarGlow} />
-            <LinearGradient
-              colors={["#818cf8", "#6366f1"]}
-              style={styles.avatarGradient}
-            >
-              <Ionicons name="person" size={50} color="#fff" />
-            </LinearGradient>
-            <TouchableOpacity style={styles.editBadge}>
-               <BlurView intensity={20} tint="light" style={styles.editBlur}>
+            <View style={[styles.avatarGlow, { backgroundColor: isDarkMode ? "rgba(99, 102, 241, 0.1)" : "rgba(6, 182, 212, 0.05)" }]} />
+            
+            {avatarUri ? (
+              <Image 
+                source={{ uri: avatarUri }} 
+                style={styles.avatarGradient} 
+                contentFit="cover"
+              />
+            ) : (
+              <LinearGradient
+                colors={["#22d3ee", "#06b6d4"]}
+                style={styles.avatarGradient}
+              >
+                <Ionicons name="person" size={50} color="#fff" />
+              </LinearGradient>
+            )}
+
+            <TouchableOpacity style={styles.editBadge} onPress={handlePickImage}>
+               <BlurView intensity={20} tint={theme.blur} style={styles.editBlur}>
                   <Ionicons name="camera-outline" size={16} color="#fff" />
                </BlurView>
             </TouchableOpacity>
           </View>
           
-          <ThemedText type="title" style={styles.userName}>AntiGravity Voyager</ThemedText>
+          <TouchableOpacity onPress={handleEditName} activeOpacity={0.7}>
+            <ThemedText type="title" style={[styles.userName, { color: theme.text }]}>{userName}</ThemedText>
+          </TouchableOpacity>
           <View style={styles.statusBadge}>
              <Ionicons name="shield-checkmark" size={12} color="#10b981" />
              <ThemedText style={styles.statusText}>PREMIUM MEMBER</ThemedText>
           </View>
         </Animated.View>
 
-        <Animated.View entering={FadeInUp.delay(350).springify()} style={styles.xpCard}>
+        <Animated.View entering={FadeInUp.delay(350).springify()} style={[styles.xpCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
            <View style={styles.xpHeader}>
               <ThemedText style={styles.xpLabel}>FIRE PROGRESS</ThemedText>
-              <ThemedText style={styles.xpValue}>{aiExperience} / {xpNeeded} XP</ThemedText>
+              <ThemedText style={[styles.xpValue, { color: theme.subText }]}>{aiExperience} / {xpNeeded} XP</ThemedText>
            </View>
            <View style={styles.xpBarTrack}>
               <Animated.View style={[styles.xpBarFill, { width: `${progress}%` }]} />
@@ -68,68 +171,61 @@ export default function ProfileScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(400).springify()} style={styles.statsRow}>
-           <StatItem label="Downloads" value={history.length.toString()} />
-           <StatItem label="Saved Data" value="4.2 GB" />
-           <StatItem label="AI Rank" value={`LVL ${aiFireLevel}`} />
+           <StatItem label="Downloads" value={history.length.toString()} theme={theme} />
+           <StatItem label="Saved Data" value="4.2 GB" theme={theme} />
+           <StatItem label="AI Rank" value={`LVL ${aiFireLevel}`} theme={theme} />
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(500).springify()} style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>PENGATURAN</ThemedText>
+          <ThemedText style={[styles.sectionTitle, { color: theme.subText }]}>PENGATURAN</ThemedText>
           
-          <BlurView intensity={20} tint="dark" style={styles.menuCard}>
+          <BlurView intensity={20} tint={theme.blur} style={[styles.menuCard, { borderColor: theme.border }]}>
             <MenuItem 
-              icon="notifications" 
-              title="Notifikasi Pintar" 
-              right={<Switch value={true} trackColor={{ false: "#1e293b", true: "#6366f1" }} thumbColor="#fff" />} 
+              icon="contrast-outline" 
+              title="Mode Gelap" 
+              theme={theme}
+              right={<Switch value={isDarkMode} onValueChange={toggleDarkMode} trackColor={{ false: "#cbd5e1", true: "#06b6d4" }} thumbColor="#fff" />} 
             />
-            <Divider />
-            <View style={styles.styleSelector}>
-               <View style={styles.styleHeader}>
-                  <View style={styles.menuIconWrapper}>
-                    <LinearGradient colors={["rgba(129, 140, 248, 0.2)", "rgba(129, 140, 248, 0.05)"]} style={styles.menuIconGradient}>
-                        <Ionicons name="color-palette" size={20} color="#818cf8" />
-                    </LinearGradient>
-                  </View>
-                  <ThemedText style={styles.menuTitle}>AI Fire Style</ThemedText>
-               </View>
-               <View style={styles.styleOptions}>
-                  {fireStyles.map((style) => (
-                    <TouchableOpacity 
-                      key={style.type}
-                      onPress={() => setFireType(style.type)}
-                      style={[
-                        styles.styleOption,
-                        aiFireType === style.type && styles.styleOptionActive
-                      ]}
-                    >
-                      <Ionicons name={style.icon as any} size={24} color={style.color} />
-                    </TouchableOpacity>
-                  ))}
-               </View>
-            </View>
-            <Divider />
+            <Divider theme={theme} />
             <MenuItem 
               icon="flash" 
               title="Turbo Download" 
-              right={<Switch value={true} trackColor={{ false: "#1e293b", true: "#6366f1" }} thumbColor="#fff" />} 
+              theme={theme}
+              right={<Switch value={turboDownload} onValueChange={toggleTurboDownload} trackColor={{ false: "#cbd5e1", true: "#06b6d4" }} thumbColor="#fff" />} 
             />
-            <Divider />
+            <Divider theme={theme} />
             <MenuItem 
               icon="folder-open" 
               title="Lokasi Penyimpanan" 
-              value="/AntiGravity/Files"
+              value="/Xdwn/Files"
+              theme={theme}
             />
           </BlurView>
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(600).springify()} style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>SUPPORT & INFO</ThemedText>
-          <BlurView intensity={20} tint="dark" style={styles.menuCard}>
-            <MenuItem icon="help-buoy" title="Pusat Bantuan" />
-            <Divider />
-            <MenuItem icon="star" title="Beri Rating AntiGravity" />
-            <Divider />
-            <MenuItem icon="information-circle" title="Tentang Aplikasi" />
+          <ThemedText style={[styles.sectionTitle, { color: theme.subText }]}>SUPPORT & INFO</ThemedText>
+          <BlurView intensity={20} tint={theme.blur} style={[styles.menuCard, { borderColor: theme.border }]}>
+            <MenuItem 
+              icon="help-buoy" 
+              title="Pusat Bantuan" 
+              theme={theme} 
+              onPress={handleHelpCenter} 
+            />
+            <Divider theme={theme} />
+            <MenuItem 
+              icon="star" 
+              title="Beri Rating Xdwn" 
+              theme={theme} 
+              onPress={handleRateApp} 
+            />
+            <Divider theme={theme} />
+            <MenuItem 
+              icon="information-circle" 
+              title="Tentang Aplikasi" 
+              theme={theme} 
+              onPress={handleAboutApp} 
+            />
           </BlurView>
         </Animated.View>
 
@@ -143,41 +239,95 @@ export default function ProfileScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        <ThemedText style={styles.versionText}>AntiGravity v1.5.0-PRO</ThemedText>
+        <ThemedText style={styles.versionText}>Xdwn v{Config.VERSION}</ThemedText>
       </ScrollView>
+
+      {/* Android Name Edit Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={20} tint="dark" style={styles.modalBlur}>
+            <View style={styles.modalContent}>
+              <ThemedText style={styles.modalTitle}>Ganti Nama</ThemedText>
+              <TextInput
+                style={styles.modalInput}
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="Masukkan nama baru..."
+                placeholderTextColor="#475569"
+                autoFocus
+                maxLength={20}
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={styles.modalCancel} 
+                  onPress={() => setModalVisible(false)}
+                >
+                  <ThemedText style={styles.cancelText}>Batal</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.modalSave} 
+                  onPress={saveNameAndroid}
+                >
+                  <LinearGradient
+                    colors={["#06b6d4", "#0891b2"]}
+                    style={styles.saveGradient}
+                  >
+                    <ThemedText style={styles.saveText}>Simpan</ThemedText>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </BlurView>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-function StatItem({ label, value }: any) {
+function StatItem({ label, value, theme }: any) {
   return (
-    <BlurView intensity={10} tint="dark" style={styles.statItem}>
-       <ThemedText style={styles.statLabel}>{label}</ThemedText>
-       <ThemedText style={styles.statValue}>{value}</ThemedText>
+    <BlurView intensity={10} tint={theme.blur} style={[styles.statItem, { borderColor: theme.border }]}>
+       <ThemedText style={[styles.statLabel, { color: theme.subText }]}>{label}</ThemedText>
+       <ThemedText style={[styles.statValue, { color: theme.text }]}>{value}</ThemedText>
     </BlurView>
   );
 }
 
-function MenuItem({ icon, title, right, value }: any) {
-  return (
+function MenuItem({ icon, title, right, value, theme, onPress }: any) {
+  const content = (
     <View style={styles.menuItem}>
       <View style={styles.menuIconWrapper}>
         <LinearGradient
-          colors={["rgba(129, 140, 248, 0.2)", "rgba(129, 140, 248, 0.05)"]}
+          colors={["rgba(34, 211, 238, 0.2)", "rgba(34, 211, 238, 0.05)"]}
           style={styles.menuIconGradient}
         >
-          <Ionicons name={icon} size={20} color="#818cf8" />
+          <Ionicons name={icon} size={20} color="#22d3ee" />
         </LinearGradient>
       </View>
-      <ThemedText style={styles.menuTitle}>{title}</ThemedText>
-      {value && <ThemedText style={styles.menuValue}>{value}</ThemedText>}
-      {right ? right : <Ionicons name="chevron-forward" size={18} color="#475569" />}
+      <ThemedText style={[styles.menuTitle, { color: theme.text }]}>{title}</ThemedText>
+      {value && <ThemedText style={[styles.menuValue, { color: theme.subText }]}>{value}</ThemedText>}
+      {right ? right : <Ionicons name="chevron-forward" size={18} color={theme.subText} />}
     </View>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.6}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return content;
 }
 
-function Divider() {
-  return <View style={styles.divider} />;
+function Divider({ theme }: any) {
+  return <View style={[styles.divider, { backgroundColor: theme.border }]} />;
 }
 
 const styles = StyleSheet.create({
@@ -317,7 +467,7 @@ const styles = StyleSheet.create({
   xpLabel: {
     fontSize: 10,
     fontWeight: "900",
-    color: "#818cf8",
+    color: "#22d3ee",
     letterSpacing: 1.5,
   },
   xpValue: {
@@ -333,7 +483,7 @@ const styles = StyleSheet.create({
   },
   xpBarFill: {
     height: "100%",
-    backgroundColor: "#6366f1",
+    backgroundColor: "#06b6d4",
     borderRadius: 3,
   },
   styleSelector: {
@@ -432,6 +582,75 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 40,
     fontWeight: "600",
-  }
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  modalBlur: {
+    width: "80%",
+    borderRadius: 32,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  modalContent: {
+    padding: 24,
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#fff",
+    marginBottom: 20,
+  },
+  modalInput: {
+    width: "100%",
+    height: 56,
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  modalCancel: {
+    flex: 1,
+    height: 50,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  },
+  cancelText: {
+    color: "#94a3b8",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  modalSave: {
+    flex: 1,
+    height: 50,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  saveGradient: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  saveText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
 });
 
